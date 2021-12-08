@@ -15,14 +15,10 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
-import numpy as np
-import pandas as pd
-import nltk
 import torch
 import transformers
-from datasets import load_dataset, load_metric
-from rouge_score import rouge_scorer
-from tqdm import tqdm
+from datasets import load_dataset, load_metric, load_from_disk
+# from rouge_score import rouge_scorer
 from transformers import (
     AutoConfig,
     AutoModelForSeq2SeqLM,
@@ -36,7 +32,6 @@ from transformers import (
     set_seed,
 )
 from transformers.trainer_utils import is_main_process
-from datasets import load_dataset
 
 
 # Set up logging
@@ -71,16 +66,16 @@ if __name__ == "__main__":
     parser.add_argument("--model_dir", type=str, default=os.environ["SM_MODEL_DIR"])
     parser.add_argument("--n_gpus", type=str, default=os.environ["SM_NUM_GPUS"])
     parser.add_argument("--training_dir", type=str, default=os.environ["SM_CHANNEL_TRAIN"])
-    parser.add_argument("--test_dir", type=str, default=os.environ["SM_CHANNEL_TEST"])
+#     parser.add_argument("--test_dir", type=str, default=os.environ["SM_CHANNEL_TEST"])
 
     args, _ = parser.parse_known_args()
 
     # load datasets
     train_dataset = load_from_disk(args.training_dir)
-    test_dataset = load_from_disk(args.test_dir)
+#     test_dataset = load_from_disk(args.test_dir)
 
     logger.info(f" loaded train_dataset length is: {len(train_dataset)}")
-    logger.info(f" loaded test_dataset length is: {len(test_dataset)}")
+#     logger.info(f" loaded test_dataset length is: {len(test_dataset)}")
 
     # compute metrics function for binary classification
     def compute_metrics(pred):
@@ -100,40 +95,38 @@ if __name__ == "__main__":
     args.model_name, cache_dir=None, use_fast=True, revision="main", use_auth_token=False,
     )
     
-    model = AutoModelForSeq2SeqLM.from_pretrained(
-    args.model_name, from_tf=bool(".ckpt" in MODEL_NAME),
+    model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name,
     config=None, cache_dir=None, revision="main",
     use_auth_token=False,)
     
     label_pad_token_id = -100
     data_collator = DataCollatorForSeq2Seq(tokenizer, label_pad_token_id=label_pad_token_id)
 
-    NUM_GPU = args.n_gpus
+    NUM_GPU = 1
     check_val = False
 
     args = Seq2SeqTrainingArguments(
         output_dir=args.output_dir,
         do_train=True,
         do_eval=True if check_val == True else False,
-        evaluation_strategy="steps",
-        eval_steps=10000,
+#         evaluation_strategy="no",
+#         eval_steps=10000,
         logging_dir=f"{args.output_data_dir}/logs",
-        # num_train_epochs=1,
+#         num_train_epochs=1,
         logging_steps=1000,
-        
-        max_steps=int(15000 * 8 / NUM_GPU),
+        num_train_epochs=args.epochs,
+#         max_steps=int(15000 * 8 / NUM_GPU),
 #         num_train_epochs=args.epoch,
         
         per_device_train_batch_size=args.train_batch_size,
-        per_device_eval_batch_size=args.eval_batch_size,
+#         per_device_eval_batch_size=args.eval_batch_size,
         gradient_accumulation_steps=2,
-        eval_accumulation_steps=None,
+#         eval_accumulation_steps=None,
         lr_scheduler_type='polynomial',
         learning_rate=float(args.learning_rate),
         warmup_steps=500,
         save_steps=20000,
-        generation_max_length=64,
-        
+#         generation_max_length=64,
         fp16=args.fp16
     )
 
@@ -157,13 +150,13 @@ if __name__ == "__main__":
     else:
         trainer.train()
     # evaluate model
-    eval_result = trainer.evaluate(eval_dataset=test_dataset)
+#     eval_result = trainer.evaluate(eval_dataset=test_dataset)
 
     # writes eval result to file which can be accessed later in s3 ouput
-    with open(os.path.join(args.output_data_dir, "eval_results.txt"), "w") as writer:
-        print(f"***** Eval results *****")
-        for key, value in sorted(eval_result.items()):
-            writer.write(f"{key} = {value}\n")
+#     with open(os.path.join(args.output_data_dir, "eval_results.txt"), "w") as writer:
+#         print(f"***** Eval results *****")
+#         for key, value in sorted(eval_result.items()):
+#             writer.write(f"{key} = {value}\n")
 
     # Saves the model to s3
     trainer.save_model(args.model_dir)
